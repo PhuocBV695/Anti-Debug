@@ -90,8 +90,8 @@ int main() {
     pNtQueryInformationProcess NtQueryInformationProcess =
         (pNtQueryInformationProcess)GetProcAddress(hNtdll, "NtQueryInformationProcess");
 
-    HANDLE DebugObject = NULL;
-    NTSTATUS status = NtQueryInformationProcess(GetCurrentProcess(), (PROCESS_INFORMATION_CLASS)0x1e, &DebugObject, sizeof(HANDLE), NULL);
+    HANDLE DebugPort = NULL;
+    NTSTATUS status = NtQueryInformationProcess(GetCurrentProcess(), (PROCESS_INFORMATION_CLASS)0x1e, &DebugPort, sizeof(HANDLE), NULL);
 
     if (status == 0 && DebugObject) {
         printf("Process is being debugged!\n");
