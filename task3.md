@@ -1,3 +1,5 @@
+# Tổng quan về Debugging  
+
 # Debug Flags  
 ## Using Win32 API  
 Các kỹ thuật antidebug trong mục này sẽ dùng winapi để nhận biết chương trình có bị debug hay không  
@@ -38,4 +40,92 @@ int main() {
     }
     return 0;
 }
+```
+ngoài ra, thông thường để bypass anti-debug khi reverse thì ta sẽ sửa giá trị thanh ghi eax hoặc cờ ZF:  
+  
+![image](https://github.com/user-attachments/assets/42599933-b529-40d4-b83a-e4afe8ddbb9c)  
+hoặc:  
+
+![image](https://github.com/user-attachments/assets/ff9b6449-adfb-4e57-9d02-b93e018cf3d8)   
+về cơ bản cách bypass các anti-debug khác cũng tương tự vậy, nên mình về sau chỉ viết các cách bypass đặc thù cho mỗi loại và sẽ không nhắc lại cách này nữa  
+### CheckRemoteDebuggerPresent()  
+Hàm CheckRemoteDebuggerPresent() là một API thuộc kernel32/kernelbase được sử dụng để kiểm tra xem một tiến trình có đang bị debug từ xa hay không  
+hàm này có khác với IsDebuggerPresent ở chỗ hàm này gọi thẳng NtQueryInformationProcess() và kiểm tra giá trị ProcessDebugPort  
+phân biệt `DebugPort và ProcessDebugPort:  
+  
+![image](https://github.com/user-attachments/assets/7415cb48-06b7-419f-af42-5d9046be22e1)  
+
+![image](https://github.com/user-attachments/assets/8c0812be-109b-40ac-9cd4-c3d35791c34a)  
+
+
+code:  
+```c
+#include <stdio.h>
+#include <windows.h>
+
+int main() {
+    BOOL bDebuggerPresent;// thực ra đặt tên biến này là gì cũng được :P
+    if (CheckRemoteDebuggerPresent(GetCurrentProcess(), &bDebuggerPresent)==1&&bDebuggerPresent==1)
+        {printf("Debugger detected!");}
+    else {printf("No debugger");}
+    return 0;
+}
+
+```
+### NtQueryInformationProcess()  
+#### ProcessDebugPort  
+Cơ chế đã trình bày ở trên, tuy nhiên lần này thay vì đơn giản là gọi CheckRemoteDebuggerPresent() từ kernel32/kernelbase thì phải load từ ntdll  
+```c
+#include <stdio.h>
+#include <windows.h>
+#include <winternl.h>
+
+// Typedef for the NtQueryInformationProcess function
+typedef NTSTATUS (NTAPI *NtQueryInformationProcessFunc)(
+    HANDLE,
+    PROCESSINFOCLASS,
+    PVOID,
+    ULONG,
+    PULONG
+);
+
+int main() {
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    if (!ntdll) {
+        printf("Failed to load ntdll.dll.\n");
+        return 1;
+    }
+
+    NtQueryInformationProcessFunc NtQueryInformationProcess = 
+        (NtQueryInformationProcessFunc)GetProcAddress(ntdll, "NtQueryInformationProcess");
+
+    if (!NtQueryInformationProcess) {
+        printf("Failed to find NtQueryInformationProcess.\n");
+        return 1;
+    }
+
+    HANDLE hProcess = GetCurrentProcess();
+    ULONG_PTR debugPort = 0;
+
+    NTSTATUS status = NtQueryInformationProcess(
+        hProcess,
+        (PROCESSINFOCLASS)7, // 7 corresponds to ProcessDebugPort
+        &debugPort,
+        sizeof(debugPort),
+        NULL
+    );
+
+    if (status == 0) { // STATUS_SUCCESS
+        if (debugPort == (ULONG_PTR)-1) {
+            printf("Debugger detected (debug port is -1).\n");
+        } else {
+            printf("No debugger detected (debug port is 0).\n");
+        }
+    } else {
+        printf("Failed to query process debug port. NTSTATUS: 0x%08X\n", status);
+    }
+
+    return 0;
+}
+
 ```
