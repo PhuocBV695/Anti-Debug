@@ -50,13 +50,7 @@ hoặc:
 về cơ bản cách bypass các anti-debug khác cũng tương tự vậy, nên mình về sau chỉ viết các cách bypass đặc thù cho mỗi loại và sẽ không nhắc lại cách này nữa  
 ### CheckRemoteDebuggerPresent()  
 Hàm CheckRemoteDebuggerPresent() là một API thuộc kernel32/kernelbase được sử dụng để kiểm tra xem một tiến trình có đang bị debug từ xa hay không  
-hàm này có khác với IsDebuggerPresent ở chỗ hàm này gọi thẳng NtQueryInformationProcess() và kiểm tra giá trị ProcessDebugPort  
-phân biệt `DebugPort và ProcessDebugPort:  
-  
-![image](https://github.com/user-attachments/assets/7415cb48-06b7-419f-af42-5d9046be22e1)  
-
-![image](https://github.com/user-attachments/assets/8c0812be-109b-40ac-9cd4-c3d35791c34a)  
-
+hàm này có khác với IsDebuggerPresent ở chỗ hàm này gọi NtQueryInformationProcess() ProcessDebugPort  
 
 code:  
 ```c
@@ -73,59 +67,42 @@ int main() {
 
 ```
 ### NtQueryInformationProcess()  
+  
+![image](https://github.com/user-attachments/assets/5b2b6ac0-ebc0-44f6-97e4-2c537d226f99)  
+`PROCESSINFOCLASS` là một danh sách liệt kê chứa các giá trị xác định loại thông tin cần lấy từ một tiến trình  
+một số giá trị cần chú ý:  
+`ProcessDebugPort(0x7)`  
+`ProcessDebugObjectHandle(0x1E)`  
+`ProcessDebugFlags(0x1F)`  
 #### ProcessDebugPort  
-Cơ chế đã trình bày ở trên, tuy nhiên lần này thay vì đơn giản là gọi CheckRemoteDebuggerPresent() từ kernel32/kernelbase thì phải load từ ntdll  
+Cơ chế: kiểm tra DebugPort trong _EPROCESS  
 ```c
 #include <stdio.h>
 #include <windows.h>
 #include <winternl.h>
 
-// Typedef for the NtQueryInformationProcess function
-typedef NTSTATUS (NTAPI *NtQueryInformationProcessFunc)(
-    HANDLE,
-    PROCESSINFOCLASS,
-    PVOID,
-    ULONG,
-    PULONG
+typedef NTSTATUS (NTAPI *pNtQueryInformationProcess)(
+    HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG, PULONG
 );
 
 int main() {
-    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    if (!ntdll) {
-        printf("Failed to load ntdll.dll.\n");
-        return 1;
-    }
+    HMODULE hNtdll = LoadLibraryA("ntdll.dll");
+    pNtQueryInformationProcess NtQueryInformationProcess =
+        (pNtQueryInformationProcess)GetProcAddress(hNtdll, "NtQueryInformationProcess");
 
-    NtQueryInformationProcessFunc NtQueryInformationProcess = 
-        (NtQueryInformationProcessFunc)GetProcAddress(ntdll, "NtQueryInformationProcess");
+    HANDLE DebugObject = NULL;
+    NTSTATUS status = NtQueryInformationProcess(GetCurrentProcess(), (PROCESS_INFORMATION_CLASS)0x1e, &DebugObject, sizeof(HANDLE), NULL);
 
-    if (!NtQueryInformationProcess) {
-        printf("Failed to find NtQueryInformationProcess.\n");
-        return 1;
-    }
-
-    HANDLE hProcess = GetCurrentProcess();
-    ULONG_PTR debugPort = 0;
-
-    NTSTATUS status = NtQueryInformationProcess(
-        hProcess,
-        (PROCESSINFOCLASS)7, // 7 corresponds to ProcessDebugPort
-        &debugPort,
-        sizeof(debugPort),
-        NULL
-    );
-
-    if (status == 0) { // STATUS_SUCCESS
-        if (debugPort == (ULONG_PTR)-1) {
-            printf("Debugger detected (debug port is -1).\n");
-        } else {
-            printf("No debugger detected (debug port is 0).\n");
-        }
+    if (status == 0 && DebugObject) {
+        printf("Process is being debugged!\n");
     } else {
-        printf("Failed to query process debug port. NTSTATUS: 0x%08X\n", status);
+        printf("Process is not being debugged.\n");
     }
 
     return 0;
 }
 
+
 ```
+về ProcessDebugObjectHandle và ProcessDebugFlags, cơ chế khác với ProcessDebugPort, tuy nhiên cách viết code anti-debug cũng tương tự, chỉ thay 0x07 thành 0x1e hoặc 0x1f  
+# Object Handles  
