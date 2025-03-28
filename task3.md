@@ -106,3 +106,95 @@ int main() {
 ```
 về ProcessDebugObjectHandle và ProcessDebugFlags, cơ chế khác với ProcessDebugPort, tuy nhiên cách viết code anti-debug cũng tương tự, chỉ thay 0x07 thành 0x1e hoặc 0x1f  
 # Object Handles  
+phần này code không chạy được, bổ sung sau  
+# Exceptions  
+## UnhandledExceptionFilter()  
+Trong Windows, nếu một chương trình gặp ngoại lệ (exception) nhưng không có handler nào để bắt lỗi đó, hệ thống sẽ gọi hàm UnhandledExceptionFilter() từ thư viện Kernel32.dll  
+nếu dùng SetUnhandledExceptionFilter() thì khi có debugger, exception sẽ chuyển cho debugger  
+code:  
+```c
+#include <stdio.h>
+#include <Windows.h>
+
+LONG nUnhandledExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo)
+{
+    PCONTEXT ctx = pExceptionInfo->ContextRecord;
+    ctx->Eip += 3; // Skip \xCC\xEB\x??
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+bool Check()
+{
+    bool bDebugged = true;
+    SetUnhandledExceptionFilter((LPTOP_LEVEL_EXCEPTION_FILTER)nUnhandledExceptionFilter);
+    __asm
+    {
+        int 3                      // CC
+        jmp near being_debugged    // EB ??
+    }
+    bDebugged = false;
+
+being_debugged:
+    return bDebugged;
+}
+
+int main() {
+    if (Check())
+        printf("Debug!\n");
+    else
+        printf("NotDebug\n");
+    return 0;
+}
+```
+## RaiseException()  
+Khi gọi hàm này, hệ điều hành sẽ tạo một ngoại lệ (exception) và kiểm tra xem có trình xử lý ngoại lệ nào có thể bắt được nó hay không  
+nếu có debugger, chương trình sẽ chuyển sang cho debugger xử lý, còn không thì sẽ gọi UnhandledExceptionFilter()  
+code:  
+```c
+bool Check()
+{
+    __try
+    {
+        RaiseException(DBG_CONTROL_C, 0, 0, NULL);
+        return true;
+    }
+    __except(DBG_CONTROL_C == GetExceptionCode()
+        ? EXCEPTION_EXECUTE_HANDLER 
+        : EXCEPTION_CONTINUE_SEARCH)
+    {
+        return false;
+    }
+}
+```
+## Hiding Control Flow with Exception Handlers  
+### SEH  
+code:  
+```c
+#include<Windows.h>
+#include<stdio.h>
+int main(void)
+{
+    int a=0;
+    __try
+    {
+        __asm int 3;
+        a+=10;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {}
+    {
+        printf("a = %d",a);
+    }
+
+    return 0;
+}
+```
+nguyên lý là khi ta gọi ngoại lệ chỉ có debugger xử lý được (như là breakpoint int 3) thì khi không có debugger sẽ crash và nhảy qua except còn khi có debugger, bên trong __try vẫn được debugger xử lý và thực thi, làm cho kết quả giữa chương trình khi bị debug và không bị debug là khác nhau:  
+Khi có debugger:  
+  
+![image](https://github.com/user-attachments/assets/82d78c2b-6721-49e5-8796-d1d4ff446e5c)  
+
+khi không debug:  
+  
+![image](https://github.com/user-attachments/assets/7e946742-717d-40f4-a6ad-501e1ae53529)
+
+
