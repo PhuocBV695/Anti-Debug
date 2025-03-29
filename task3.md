@@ -444,5 +444,118 @@ void foo()
     // ...
 }
 ```
+### ReadFile(), WriteProcessMemory()  
+vẫn hoạt động theo nguyên lý tnhuw trên nhưng dùng các WinApi như ReadFile(), WriteProcessMemory()  
+### Hardware Breakpoints  
+Hardware Breakpoint sử dụng Debug Registers (DR0 - DR3) để đặt breakpoint mà không thay đổi mã thực thi.  
+CPU sẽ tự động dừng khi truy cập vào địa chỉ đã đặt mà không cần sửa đổi mã nguồn.  
+để phát hiện thì chỉ cần kiểm tra các thanh ghi debug DR0, DR1, DR2, DR3, nếu có thanh ghi có giá trị khác 0 thì chương trình ấy đã bị đặt hardware breakpoint  
+code:  
+```c
+bool IsDebugged()
+{
+    CONTEXT ctx;  // Tạo một cấu trúc CONTEXT để lưu trạng thái CPU
+    ZeroMemory(&ctx, sizeof(CONTEXT));  // Đặt toàn bộ bộ nhớ của ctx thành 0
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;  // Chỉ lấy thông tin về Debug Registers
 
-  
+    if(!GetThreadContext(GetCurrentThread(), &ctx))
+        return false;
+
+    return ctx.Dr0 || ctx.Dr1 || ctx.Dr2 || ctx.Dr3;
+}
+```
+### Patch ntdll!DbgBreakPoint()  
+kỹ thuật này khá hay  
+Khi debugger cần đặt breakpoint, debugger sẽ phải gọi hàm `ntdll!DbgBreakPoint()`, chức năng của hàm này là thay thế opcodes tại breakpoint bằng exception `int 3`  
+Kỹ thuật này anti-debug bằng cách patch luôn `ntdll!DbgBreakPoint()` khiến cho khi debugger đặt breakpoint, thay vì đặt 0xCC thì sẽ đặt 0xC3 `ret`  
+muốn sử dụng lại chức năng đặt breakpoint thì phải khởi động lại hệ điều hành để ntdll.dll tạo lại process mới (phần này mình đã có nói ở bài shellcode)  
+code:  
+```c
+void Patch_DbgBreakPoint()
+{
+    HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
+    if (!hNtdll)
+        return;
+
+    FARPROC pDbgBreakPoint = GetProcAddress(hNtdll, "DbgBreakPoint");
+    if (!pDbgBreakPoint)
+        return;
+
+    DWORD dwOldProtect;
+    if (!VirtualProtect(pDbgBreakPoint, 1, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+        return;
+
+    *(PBYTE)pDbgBreakPoint = (BYTE)0xC3; // ret
+}
+```
+### Performing Code Checksums  
+Kỹ thuật này so sánh checksum của code gốc và code lúc debug, vì khi đặt breakpoint, ta đã thay đổi opcode nên checksum đã thay đổi, từ đó phát hiện debug  
+code:  
+```c
+PVOID g_pFuncAddr;
+DWORD g_dwFuncSize;
+DWORD g_dwOriginalChecksum;
+
+static void VeryImportantFunction()
+{
+    // ...
+}
+
+static DWORD WINAPI ThreadFuncCRC32(LPVOID lpThreadParameter)
+{
+    while (true)
+    {
+        if (CRC32((PBYTE)g_pFuncAddr, g_dwFuncSize) != g_dwOriginalChecksum)
+            ExitProcess(0);
+        Sleep(10000);
+    }
+    return 0;
+}
+
+size_t DetectFunctionSize(PVOID pFunc)
+{
+    PBYTE pMem = (PBYTE)pFunc;
+    size_t nFuncSize = 0;
+    do
+    {
+        ++nFuncSize;
+    } while (*(pMem++) != 0xC3);
+    return nFuncSize;
+}
+
+int main()
+{
+    g_pFuncAddr = (PVOID)&VeryImportantFunction;
+    g_dwFuncSize = DetectFunctionSize(g_pFuncAddr);
+    g_dwOriginalChecksum = CRC32((PBYTE)g_pFuncAddr, g_dwFuncSize);
+    
+    HANDLE hChecksumThread = CreateThread(NULL, NULL, ThreadFuncCRC32, NULL, NULL, NULL);
+    
+    // ...
+    
+    return 0;
+}
+```
+# Assembly instructions  
+## INT 3  
+code:  
+```c
+bool IsDebugged()
+{
+    __try
+    {
+        __asm int 3;
+        return true;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+```
+debugger có thể xử lý exception `int 3` nên nếu ta`continue`, chương trình sẽ tiếp tục nhảy vào `return true` trước khi kịp vào `__except`  
+từ đó chương trình có thể phát hiện debugger  
+tương tự với `int 2d`  
+## DebugBreak  
+Tương tự `INT 3`/`INT 2D`, chỉ khác là được gọi từ WinApi thay vì asm  
+
