@@ -50,7 +50,7 @@ hoặc:
 về cơ bản cách bypass các anti-debug khác cũng tương tự vậy, nên mình về sau chỉ viết các cách bypass đặc thù cho mỗi loại và sẽ không nhắc lại cách này nữa  
 ### CheckRemoteDebuggerPresent()  
 Hàm CheckRemoteDebuggerPresent() là một API thuộc kernel32/kernelbase được sử dụng để kiểm tra xem một tiến trình có đang bị debug từ xa hay không  
-hàm này có khác với IsDebuggerPresent ở chỗ hàm này gọi NtQueryInformationProcess() ProcessDebugPort  
+hàm này có khác với IsDebuggerPresent ở chỗ hàm này gọi NtQueryInformationProcess() ProcessDebugPort thay vì lấy giá trị ở `BeingDebugged`  
 
 code:  
 ```c
@@ -108,9 +108,8 @@ về ProcessDebugObjectHandle và ProcessDebugFlags, cơ chế khác với Proce
 # Object Handles  
 phần này code không chạy được, bổ sung sau  
 # Exceptions  
+Các kỹ thuật anti-debug mục này khá hay và khá khó khăn cho việc xác định luồng và bypass anti-debug, không đơn thuần chỉ là kiểm tra if-else như mục DebugFLags  
 ## UnhandledExceptionFilter()  
-Trong Windows, nếu một chương trình gặp ngoại lệ (exception) nhưng không có handler nào để bắt lỗi đó, hệ thống sẽ gọi hàm UnhandledExceptionFilter() từ thư viện Kernel32.dll  
-nếu dùng SetUnhandledExceptionFilter() thì khi có debugger, exception sẽ chuyển cho debugger  
 code:  
 ```c
 #include <stdio.h>
@@ -118,6 +117,7 @@ code:
 
 LONG nUnhandledExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo)
 {
+    printf("hoho\n");
     PCONTEXT ctx = pExceptionInfo->ContextRecord;
     ctx->Eip += 3; // Skip \xCC\xEB\x??
     return EXCEPTION_CONTINUE_EXECUTION;
@@ -125,8 +125,10 @@ LONG nUnhandledExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo)
 
 bool Check()
 {
+    printf("hehe\n");
     bool bDebugged = true;
     SetUnhandledExceptionFilter((LPTOP_LEVEL_EXCEPTION_FILTER)nUnhandledExceptionFilter);
+    printf("lala\n");
     __asm
     {
         int 3                      // CC
@@ -146,6 +148,15 @@ int main() {
     return 0;
 }
 ```
+nguyên lý là: khi ta đăng ký hàm nUnhandledExceptionFilter() (hàm bất kỳ, bất cứ tên nào) với SetUnhandledExceptionFilter(), khi có debugger, chương trình sẽ chạy qua mà không thực thi hàm nUnhandledExceptionFilter() mà ta đã đăng ký.  
+còn khi không debug, chương trình sẽ chạy bình thường cho đến khi gặp ngoại lệ, sẽ thực thi hàm nUnhandledExceptionFilter() mà ta đã đăng ký, sau đó vẫn tiếp tục chương trình ngay tại ngoại lệ đó.  
+Khi debug:  
+
+![image](https://github.com/user-attachments/assets/bf7313a1-7edf-46ac-9688-b9fc604a9fda)  
+Khi không debug (hãy chú ý thứ tự thực thi):  
+
+![image](https://github.com/user-attachments/assets/ee082fc7-94cb-44e7-adbc-b0f3771fca22)  
+  
 ## RaiseException()  
 Khi gọi hàm này, hệ điều hành sẽ tạo một ngoại lệ (exception) và kiểm tra xem có trình xử lý ngoại lệ nào có thể bắt được nó hay không  
 nếu có debugger, chương trình sẽ chuyển sang cho debugger xử lý, còn không thì sẽ gọi UnhandledExceptionFilter()  
@@ -197,4 +208,45 @@ khi không debug:
   
 ![image](https://github.com/user-attachments/assets/7e946742-717d-40f4-a6ad-501e1ae53529)
 
+### VEH  
+code:  
+```c
+#include<Windows.h>
+#include<stdio.h>
+
+PVOID g_pLastVeh = nullptr;
+int a = 0;
+
+LONG WINAPI ExeptionHandler1(PEXCEPTION_POINTERS pExceptionInfo)
+{
+    a+=5;
+    printf("a = %d", a);
+    ExitProcess(0);
+}
+
+int main(void)
+{
+    g_pLastVeh = AddVectoredExceptionHandler(TRUE, ExeptionHandler1);
+    printf("hehe\n");
+    if (g_pLastVeh) {
+        __asm int 3;
+        a += 10;
+    }
+    printf("a = %d", a);
+    return 0;
+}
+```
+nguyên lý là: đăng ký ExeptionHandler1 với AddVectoredExceptionHandler để khi gặp ngoại lệ mà không xử lý được, chương trình sẽ nhảy vào hàm ExeptionHandler1()  
+Tức là chương trình khi không có debugger sẽ chạy hết cho đến khi gặp ngoại lệ, sẽ nhảy vào hàm ExeptionHandler1() còn nếu ngoại lệ có thể xử lý được, sẽ chạy tiếp mà không nhảy vào hàm ExeptionHandler1()  
+khi không debug:  
+  
+![image](https://github.com/user-attachments/assets/77b79592-44cb-4e24-88ea-687c17ef43ab)  
+ta thấy chương trình đã thực hiện in "hehe" và khi gặp ngoại lệ, đã thực thi hàm ExeptionHandler1() thay vì tiếp tục hàm main()  
+khi debug:  
+
+![image](https://github.com/user-attachments/assets/1ec8ec8b-a1fc-4028-9a9e-cd02381a21a8)  
+ta thấy chương trình không nhảy vào ExeptionHandler1() mà vẫn tiếp tục cho đến hết chương trình.  
+Tuy có vẻ giống nhau nhưng ta có thể dễ dàng nhận thấy điểm khác nhau giữa AddVectoredExceptionHandler và SetUnhandledExceptionFilter():  
+sau khi thực thi hàm đã đăng ký với SetUnhandledExceptionFilter(), chương trình sẽ tiếp tục thực thi chương trình tại ngoại lệ.  
+còn đối với AddVectoredExceptionHandler, chương trình sẽ thoát sau khi thực thi hàm đã đăng ký.  
 
