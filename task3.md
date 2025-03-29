@@ -149,7 +149,7 @@ int main() {
 }
 ```
 nguyên lý là: khi ta đăng ký hàm nUnhandledExceptionFilter() (hàm bất kỳ, bất cứ tên nào) với SetUnhandledExceptionFilter(), khi có debugger, chương trình sẽ chạy qua mà không thực thi hàm nUnhandledExceptionFilter() mà ta đã đăng ký.  
-còn khi không debug, chương trình sẽ chạy bình thường cho đến khi gặp ngoại lệ, sẽ thực thi hàm nUnhandledExceptionFilter() mà ta đã đăng ký, sau đó vẫn tiếp tục chương trình ngay tại ngoại lệ đó.  
+còn khi không debug, chương trình sẽ chạy bình thường cho đến khi gặp ngoại lệ, sẽ thực thi hàm nUnhandledExceptionFilter() mà ta đã đăng ký, sau đó vẫn tiếp tục chương trình ngay tại địa chỉ được push vào đỉnh stack.  
 Khi debug:  
 
 ![image](https://github.com/user-attachments/assets/bf7313a1-7edf-46ac-9688-b9fc604a9fda)  
@@ -247,6 +247,6 @@ khi debug:
 ![image](https://github.com/user-attachments/assets/1ec8ec8b-a1fc-4028-9a9e-cd02381a21a8)  
 ta thấy chương trình không nhảy vào ExeptionHandler1() mà vẫn tiếp tục cho đến hết chương trình.  
 Tuy có vẻ giống nhau nhưng ta có thể dễ dàng nhận thấy điểm khác nhau giữa AddVectoredExceptionHandler và SetUnhandledExceptionFilter():  
-sau khi thực thi hàm đã đăng ký với SetUnhandledExceptionFilter(), chương trình sẽ tiếp tục thực thi chương trình tại ngoại lệ.  
+sau khi thực thi hàm đã đăng ký với SetUnhandledExceptionFilter(), chương trình sẽ tiếp tục thực thi chương trình tại địa chỉ được push vào đỉnh stack.  
 còn đối với AddVectoredExceptionHandler, chương trình sẽ thoát sau khi thực thi hàm đã đăng ký.  
 
