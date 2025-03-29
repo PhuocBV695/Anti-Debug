@@ -149,7 +149,7 @@ int main() {
 }
 ```
 nguyên lý là: khi ta đăng ký hàm nUnhandledExceptionFilter() (hàm bất kỳ, bất cứ tên nào) với SetUnhandledExceptionFilter(), khi có debugger, chương trình sẽ chạy qua mà không thực thi hàm nUnhandledExceptionFilter() mà ta đã đăng ký.  
-còn khi không debug, chương trình sẽ chạy bình thường cho đến khi gặp ngoại lệ, sẽ thực thi hàm nUnhandledExceptionFilter() mà ta đã đăng ký, sau đó vẫn tiếp tục chương trình ngay tại địa chỉ được push vào đỉnh stack.  
+còn khi không debug, chương trình sẽ chạy bình thường cho đến khi gặp ngoại lệ, sẽ thực thi hàm nUnhandledExceptionFilter() mà ta đã đăng ký, sau đó tiếp tục chương trình ngay tại địa chỉ được push vào đỉnh stack.  
 Khi debug:  
 
 ![image](https://github.com/user-attachments/assets/bf7313a1-7edf-46ac-9688-b9fc604a9fda)  
@@ -162,20 +162,40 @@ Khi gọi hàm này, hệ điều hành sẽ tạo một ngoại lệ (exception
 nếu có debugger, chương trình sẽ chuyển sang cho debugger xử lý, còn không thì sẽ gọi UnhandledExceptionFilter()  
 code:  
 ```c
-bool Check()
-{
-    __try
-    {
+#include <stdio.h>
+#include <Windows.h>
+
+int main() {
+    printf("hehe\n");
+    __try {
+        printf("haha\n");
         RaiseException(DBG_CONTROL_C, 0, 0, NULL);
-        return true;
+        printf("hihi\n");
+        return 0;
     }
-    __except(DBG_CONTROL_C == GetExceptionCode()
-        ? EXCEPTION_EXECUTE_HANDLER 
-        : EXCEPTION_CONTINUE_SEARCH)
-    {
-        return false;
+    __except (DBG_CONTROL_C == GetExceptionCode()
+        ? EXCEPTION_EXECUTE_HANDLER // nếu ngoại lệ là DBG_CONTROL_C thì thực thi code bên trong except (tức "huhu")
+        : EXCEPTION_CONTINUE_SEARCH) // còn khác thì tiếp tục thực thi code tiếp theo của ngoại lệ (tức "hihi")
+    {   
+        printf("huhu\n");
+        return 0;
     }
 }
+
+```
+cơ bản là RaiseException() chỉ là báo ngoại lệ rồi crash, nếu có debugger thì debugger sẽ xử lý ngoại lệ rồi vẫn crash  
+phiên bản đơn giản, dễ hiểu chức năng hơn:  
+```c
+#include <stdio.h>
+#include <Windows.h>
+
+int main() {
+    printf("hehe\n");
+    RaiseException(DBG_CONTROL_C, 0, 0, NULL);
+    printf("hihi\n");
+    return 0;
+}
+
 ```
 ## Hiding Control Flow with Exception Handlers  
 ### SEH  
@@ -237,7 +257,7 @@ int main(void)
 }
 ```
 nguyên lý là: đăng ký ExeptionHandler1 với AddVectoredExceptionHandler để khi gặp ngoại lệ mà không xử lý được, chương trình sẽ nhảy vào hàm ExeptionHandler1()  
-Tức là chương trình khi không có debugger sẽ chạy hết cho đến khi gặp ngoại lệ, sẽ nhảy vào hàm ExeptionHandler1() còn nếu ngoại lệ có thể xử lý được, sẽ chạy tiếp mà không nhảy vào hàm ExeptionHandler1()  
+Tức là khi không có debugger, chương trình chạy cho đến khi gặp ngoại lệ, sẽ nhảy vào hàm ExeptionHandler1() còn nếu ngoại lệ có thể xử lý được, sẽ chạy tiếp mà không nhảy vào hàm ExeptionHandler1()  
 khi không debug:  
   
 ![image](https://github.com/user-attachments/assets/77b79592-44cb-4e24-88ea-687c17ef43ab)  
@@ -246,6 +266,7 @@ khi debug:
 
 ![image](https://github.com/user-attachments/assets/1ec8ec8b-a1fc-4028-9a9e-cd02381a21a8)  
 ta thấy chương trình không nhảy vào ExeptionHandler1() mà vẫn tiếp tục cho đến hết chương trình.  
+  
 Tuy có vẻ giống nhau nhưng ta có thể dễ dàng nhận thấy điểm khác nhau giữa AddVectoredExceptionHandler và SetUnhandledExceptionFilter():  
 sau khi thực thi hàm đã đăng ký với SetUnhandledExceptionFilter(), chương trình sẽ tiếp tục thực thi chương trình tại địa chỉ được push vào đỉnh stack.  
 còn đối với AddVectoredExceptionHandler, chương trình sẽ thoát sau khi thực thi hàm đã đăng ký.  
