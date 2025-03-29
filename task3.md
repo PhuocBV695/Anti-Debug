@@ -66,7 +66,7 @@ int main() {
 }
 
 ```
-### NtQueryInformationProcess()  
+## NtQueryInformationProcess()  
   
 ![image](https://github.com/user-attachments/assets/5b2b6ac0-ebc0-44f6-97e4-2c537d226f99)  
 `PROCESSINFOCLASS` là một danh sách liệt kê chứa các giá trị xác định loại thông tin cần lấy từ một tiến trình  
@@ -74,7 +74,7 @@ một số giá trị cần chú ý:
 `ProcessDebugPort(0x7)`  
 `ProcessDebugObjectHandle(0x1E)`  
 `ProcessDebugFlags(0x1F)`  
-#### ProcessDebugPort  
+### ProcessDebugPort  
 Cơ chế: kiểm tra DebugPort trong _EPROCESS  
 ```c
 #include <stdio.h>
@@ -158,8 +158,7 @@ Khi không debug (hãy chú ý thứ tự thực thi):
 ![image](https://github.com/user-attachments/assets/ee082fc7-94cb-44e7-adbc-b0f3771fca22)  
   
 ## RaiseException()  
-Khi gọi hàm này, hệ điều hành sẽ tạo một ngoại lệ (exception) và kiểm tra xem có trình xử lý ngoại lệ nào có thể bắt được nó hay không  
-nếu có debugger, chương trình sẽ chuyển sang cho debugger xử lý, còn không thì sẽ gọi UnhandledExceptionFilter()  
+  
 code:  
 ```c
 #include <stdio.h>
@@ -271,3 +270,179 @@ Tuy có vẻ giống nhau nhưng ta có thể dễ dàng nhận thấy điểm k
 sau khi thực thi hàm đã đăng ký với SetUnhandledExceptionFilter(), chương trình sẽ tiếp tục thực thi chương trình tại địa chỉ được push vào đỉnh stack.  
 còn đối với AddVectoredExceptionHandler, chương trình sẽ thoát sau khi thực thi hàm đã đăng ký.  
 
+## Bypass  
+mục này có vẻ khá phức tạp và tiềm năng biến tấu thành những problem khó khá cao, việc patch, nop hay nhảy luồng chưa chắc đã tối ưu và đi được đúng hướng.  
+# Timming  
+Các kỹ thuật anti-debug mục này chủ yếu dựa vào sự chênh lệch thời gian hoặc số lượng câu lệnh  
+## RDPMC/RDTSC  
+Là 2 câu lệnh sử dụng cờ PCE trong thanh ghi CR4.  
+RDPMC dùng trong Kernel mode.  
+RDTSC dùng trong user mode.  
+về cơ bản, 2 lệnh này có nhưng điểm phân biệt như sau:  
+![image](https://github.com/user-attachments/assets/7acc26df-1d72-48cb-8643-9a56f092d4c8)  
+code RDPMC:  
+```c
+bool IsDebugged(DWORD64 qwNativeElapsed)
+{
+    ULARGE_INTEGER Start, End;
+    __asm
+    {
+        xor  ecx, ecx
+        rdpmc
+        mov  Start.LowPart, eax
+        mov  Start.HighPart, edx
+    }
+    // ... some work
+    __asm
+    {
+        xor  ecx, ecx
+        rdpmc
+        mov  End.LowPart, eax
+        mov  End.HighPart, edx
+    }
+    return (End.QuadPart - Start.QuadPart) > qwNativeElapsed;
+}
+```
+code RDTSC:  
+```c
+bool IsDebugged(DWORD64 qwNativeElapsed)
+{
+    ULARGE_INTEGER Start, End;
+    __asm
+    {
+        xor  ecx, ecx
+        rdtsc
+        mov  Start.LowPart, eax
+        mov  Start.HighPart, edx
+    }
+    // ... some work
+    __asm
+    {
+        xor  ecx, ecx
+        rdtsc
+        mov  End.LowPart, eax
+        mov  End.HighPart, edx
+    }
+    return (End.QuadPart - Start.QuadPart) > qwNativeElapsed;
+}
+```
+phần này vẫn là trả về `True` - `False` nên bypass không quá khó khăn và cũng dễ phát hiện.  
+## GetLocalTime(), GetSystemTime()  
+vẫn thế nhưng dùng localtime và gọi bằng WinApi thay vì dùng asm như trên  
+code `GetLocalTime()`:  
+```c
+bool IsDebugged(DWORD64 qwNativeElapsed)
+{
+    SYSTEMTIME stStart, stEnd;
+    FILETIME ftStart, ftEnd;
+    ULARGE_INTEGER uiStart, uiEnd;
+
+    GetLocalTime(&stStart);
+    // ... some work
+    GetLocalTime(&stEnd);
+
+    if (!SystemTimeToFileTime(&stStart, &ftStart))
+        return false;
+    if (!SystemTimeToFileTime(&stEnd, &ftEnd))
+        return false;
+
+    uiStart.LowPart  = ftStart.dwLowDateTime;
+    uiStart.HighPart = ftStart.dwHighDateTime;
+    uiEnd.LowPart  = ftEnd.dwLowDateTime;
+    uiEnd.HighPart = ftEnd.dwHighDateTime;
+    return (uiEnd.QuadPart - uiStart.QuadPart) > qwNativeElapsed;
+}
+```  
+code `GetSystemTime()`  
+```c
+bool IsDebugged(DWORD64 qwNativeElapsed)
+{
+    SYSTEMTIME stStart, stEnd;
+    FILETIME ftStart, ftEnd;
+    ULARGE_INTEGER uiStart, uiEnd;
+
+    GetSystemTime(&stStart);
+    // ... some work
+    GetSystemTime(&stEnd);
+
+    if (!SystemTimeToFileTime(&stStart, &ftStart))
+        return false;
+    if (!SystemTimeToFileTime(&stEnd, &ftEnd))
+        return false;
+
+    uiStart.LowPart  = ftStart.dwLowDateTime;
+    uiStart.HighPart = ftStart.dwHighDateTime;
+    uiEnd.LowPart  = ftEnd.dwLowDateTime;
+    uiEnd.HighPart = ftEnd.dwHighDateTime;
+    return (uiEnd.QuadPart - uiStart.QuadPart) > qwNativeElapsed;
+}
+```
+các cách anti-debug trong mục này cơ bản đều tương tự nhau, chỉ khác cách gọi hàm tính thời gian.  
+# Process Memory  
+## Breakpoints  
+### Software Breakpoints (INT3)  
+Kỹ thuật anti-debug này chỉ sử dụng được trong 1 vùng nhớ nhất định đã được khai báo trước  
+nguyên lý là: khi debugger đặt breakpoint thì sẽ lưu opcode ở đấy rồi thay thế bằng 0xCC  
+Để phát hiện thì chương trình kiểm tra vùng nhớ đấy xem có opcode 0xCC nào không  
+code:  
+```c
+bool CheckForSpecificByte(BYTE cByte, PVOID pMemory, SIZE_T nMemorySize = 0)
+{
+    PBYTE pBytes = (PBYTE)pMemory; 
+    for (SIZE_T i = 0; ; i++)
+    {
+        // Break on RET (0xC3) if we don't know the function's size
+        if (((nMemorySize > 0) && (i >= nMemorySize)) ||
+            ((nMemorySize == 0) && (pBytes[i] == 0xC3)))
+            break;
+
+        if (pBytes[i] == cByte)
+            return true;
+    }
+    return false;
+}
+
+bool IsDebugged()
+{
+    PVOID functionsToCheck[] = {
+        &Function1,
+        &Function2,
+        &Function3,
+    };
+    for (auto funcAddr : functionsToCheck)
+    {
+        if (CheckForSpecificByte(0xCC, funcAddr))
+            return true;
+    }
+    return false;
+}
+```
+cách bypass thì ta có thể patch đoạn code này hoặc đặt breakpoint ngay trước khi dòng code anti-debug này thực thi hoặc tryhard hơn thì đặt hardware breakpoint (vì hardware breakpoint không đặt opcode 0xcc)  
+### Direct Memory Modification  
+1 cách cực đoan hơn cách trên thì ta không chỉ quét opcodes 0xcc mà còn thay thế nó bằng opcodes khác như `nop`  
+hoặc có thể là patch địa chỉ mà hàm return để thay đổi trực tiếp luồng chương trình, gây khó khăn cho việc debug  
+code:  
+```c
+#include <intrin.h>
+#pragma intrinsic(_ReturnAddress)
+
+void foo()
+{
+    // ...
+    
+    PVOID pRetAddress = _ReturnAddress();
+    if (*(PBYTE)pRetAddress == 0xCC) // int 3
+    {
+        DWORD dwOldProtect;
+        if (VirtualProtect(pRetAddress, 1, PAGE_EXECUTE_READWRITE, &dwOldProtect))
+        {
+            *(PBYTE)pRetAddress = 0x90; // nop
+            VirtualProtect(pRetAddress, 1, dwOldProtect, &dwOldProtect);
+        }
+    }
+    
+    // ...
+}
+```
+
+  
