@@ -267,7 +267,7 @@ khi debug:
 ta thấy chương trình không nhảy vào ExeptionHandler1() mà vẫn tiếp tục cho đến hết chương trình.  
   
 Tuy có vẻ giống nhau nhưng ta cần phân biệt điểm khác nhau giữa AddVectoredExceptionHandler và SetUnhandledExceptionFilter():  
-nhưng hàm được đăng ký với AddVectoredExceptionHandler có ưu tiên cao nhất (khi gặp ngoại lệ) và có thể đăng ký nhiều hàm và sẽ được thực hiện theo thứ tự đăng ký, còn SetUnhandledExceptionFilter() có ưu tiên thấp nhất và sẽ bị ghi đè khi đăng ký nhiều lần  
+nhưng hàm được đăng ký với AddVectoredExceptionHandler có thể đăng ký thứ tự ưu tiên(khi gặp ngoại lệ) và có thể đăng ký nhiều hàm và sẽ được thực hiện theo thứ tự đăng ký, còn SetUnhandledExceptionFilter() có ưu tiên thấp nhất và sẽ bị ghi đè khi đăng ký nhiều lần  
 
 ## Bypass  
 mục này có vẻ khá phức tạp và tiềm năng biến tấu thành những problem khó khá cao, việc patch, nop hay nhảy luồng chưa chắc đã tối ưu và đi được đúng hướng.  
