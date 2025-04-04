@@ -182,8 +182,7 @@ int main() {
 }
 
 ```
-cơ bản là RaiseException() chỉ là báo ngoại lệ rồi crash, nếu có debugger thì debugger sẽ xử lý ngoại lệ rồi vẫn crash  
-phiên bản đơn giản, dễ hiểu chức năng hơn:  
+cơ bản là RaiseException() đăng ký 1 ngoại lệ, nếu handler không xử lý được ngoại lệ thì sẽ tiếp tục chương trình, ngược lại thì sẽ báo exception  
 ```c
 #include <stdio.h>
 #include <Windows.h>
